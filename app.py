@@ -12,7 +12,7 @@ from src.service.drive_service import DriveService
 
 st.set_page_config(page_title="VTEX Integration", layout="wide")
 
-google_credentials = service_account.Credentials.from_service_account_file(
+google_credentials = service_account.Credentials.from_service_account_info(
     st.secrets["gcp_service_account"],
     scopes=["https://www.googleapis.com/auth/drive", "https://www.googleapis.com/auth/spreadsheets"]
 )

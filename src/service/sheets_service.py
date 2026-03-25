@@ -6,7 +6,6 @@ class SheetsService:
         self.ss = self.client.open_by_key(spreadsheet_id)
 
     def get_vtex_config(self):
-        """Lê as configurações da primeira aba (ou aba ativa)"""
         
         sheet = self.ss.get_worksheet(0) 
         return {
@@ -15,17 +14,19 @@ class SheetsService:
             "appToken": sheet.acell('B4').value
         }
 
-    def write_report(self, df, sheet_name="Dados_Atualizados"):
-        """Limpa e escreve os dados na aba de destino"""
+    def prepare_sheet(self, sheet_name, headers):
         try:
             worksheet = self.ss.worksheet(sheet_name)
         except gspread.exceptions.WorksheetNotFound:
             worksheet = self.ss.add_worksheet(title=sheet_name, rows="100", cols="20")
-
-        worksheet.clear()
-        # Prepara cabeçalho e dados
-        data = [df.columns.values.tolist()] + df.astype(str).values.tolist()
-        worksheet.update('A1', data)
         
-        # Formatação básica (Opcional, similar ao seu JS)
-        worksheet.format("A1:H1", {"textFormat": {"bold": True}, "backgroundColor": {"red": 0.9, "green": 0.9, "blue": 0.9}})
+        worksheet.clear()
+        worksheet.update('A1', [headers])
+        
+        worksheet.format("A1:H1", {"textFormat": {"bold": True}, "backgroundColor": {"red": 0.8, "green": 0.8, "blue": 0.8}})
+        return worksheet
+
+    def append_data(self, worksheet, data):
+        if data:
+            string_data = [[str(cell) for cell in row] for row in data]
+            worksheet.append_rows(string_data)

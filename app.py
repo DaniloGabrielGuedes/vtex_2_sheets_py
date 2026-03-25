@@ -1,9 +1,10 @@
 import streamlit as st
 import os
+import time
+import traceback
+from datetime import timedelta
 from dotenv import load_dotenv
 from google.oauth2 import service_account
-import pandas as pd
-import traceback
 
 from src.service.sheets_service import SheetsService
 from src.service.vtex_service import VtexService
@@ -45,54 +46,84 @@ selected_sheet_name = st.selectbox("Selecione a Planilha que contém as configur
 selected_sheet_id = sheet_options[selected_sheet_name]
 
 if st.button("🚀 Iniciar Processamento", type="primary"):
+    tempo_inicio_total = time.time()
+    
     try:
         sheets_service = SheetsService(google_credentials, selected_sheet_id)
         
         with st.spinner("Lendo configurações da planilha..."):
             vtex_config = sheets_service.get_vtex_config()
-            if vtex_config['loja']: st.info(f"Conectado à loja: {vtex_config['loja']}")
         
         if not vtex_config['loja']:
-            st.error("Configurações VTEX não encontradas ou incompletas na planilha. Verifique se as chaves e suas formatações estão corretas.")
+            st.error("Configurações VTEX não encontradas.")
             st.stop()
 
         vtex_service = VtexService(vtex_config)
+        processor = VtexProcessor()
+        
+        cols = ["Data", "Pedido", "Status", "IDProduto", "Produto", "Quantidade", "ValorUnitario", "ValorTotal"]
+        ws = sheets_service.prepare_sheet("Dados_Atualizados", cols)
+        
+        lista_dias = []
+        data_atual = data_inicio
+        while data_atual <= data_fim:
+            lista_dias.append(data_atual)
+            data_atual += timedelta(days=1)
+        
+        total_dias = len(lista_dias)
+        st.info(f"Iniciando processamento de {total_dias} dias...")
 
-        with st.spinner("Buscando pedidos na VTEX..."):
-            dt_ini = data_inicio.strftime("%Y-%m-%dT00:00:00Z")
-            dt_fim = data_fim.strftime("%Y-%m-%dT23:59:59Z")
-
-            all_summaries = []
-            page = 1
-            while True:
-                res = vtex_service.fetch_orders_list(dt_ini, dt_fim, page)
-                if not res or not res.get('list'): break
-                all_summaries.extend(res['list'])
-                if page >= res['paging']['pages']: break
-                page += 1
-
-        if not all_summaries:
-            st.warning("Nenhum pedido encontrado no período.")
-            st.stop()
-
+        status_log = st.empty()
         prog_bar = st.progress(0.0)
         prog_text = st.empty()
         
-        def up_bar(percent):
-            prog_bar.progress(percent)
-            prog_text.text(f"Processando: {int(percent * 100)}%")
+        linhas_totais = 0
+
+        # LOOP DIÁRIO
+        for idx, dia in enumerate(lista_dias):
+            dia_str = dia.strftime("%d/%m/%Y")
+            dt_ini_vtex = dia.strftime("%Y-%m-%dT00:00:00Z")
+            dt_fim_vtex = dia.strftime("%Y-%m-%dT23:59:59Z")
+            
+            status_log.markdown(f"📅 **Processando dia:** {dia_str} ({idx + 1}/{total_dias})")
+            
+            summaries_do_dia = []
+            page = 1
+            while True:
+                res = vtex_service.fetch_orders_list(dt_ini_vtex, dt_fim_vtex, page)
+                if not res or not res.get('list'): break
+                summaries_do_dia.extend(res['list'])
+                if page >= res['paging']['pages']: break
+                page += 1
+            
+            if summaries_do_dia:
+                def up_bar_dia(percent):
+                    global_percent = (idx + percent) / total_dias
+                    prog_bar.progress(min(global_percent, 1.0))
+                    prog_text.text(f"Dia {dia_str}: {int(percent * 100)}% concluído")
+
+                data_rows = processor.process_all(summaries_do_dia, vtex_service, up_bar_dia)
+                
+                if data_rows:
+                    sheets_service.append_data(ws, data_rows)
+                    linhas_totais += len(data_rows)
+            else:
+                prog_bar.progress((idx + 1) / total_dias)
+
+        tempo_final_total = time.time()
+        duracao = tempo_final_total - tempo_inicio_total
+
+        m, s = divmod(int(duracao), 60)
+        tempo_formatado = f"{m}min {s}s" if m > 0 else f"{s}s"
+
+        st.success(f"✅ Processamento Concluído!")
+
+        col_res1, col_res2 = st.columns(2)
+        col_res1.metric("Linhas Processadas", linhas_totais)
+        col_res2.metric("Tempo Total", tempo_formatado)
         
-        processor = VtexProcessor()
-        data_rows = processor.process_all(all_summaries, vtex_service, up_bar)
-        
-        # Converte para DataFrame e envia ao Sheets
-        cols = ["Data", "Pedido", "Status", "IDProduto", "Produto", "Quantidade", "ValorUnitario", "ValorTotal"]
-        df_final = pd.DataFrame(data_rows, columns=cols)
-        
-        sheets_service.write_report(df_final)
-        st.success(f"Sucesso! {len(df_final)} linhas processadas e enviadas para 'Dados_Atualizados'.")
         st.balloons()
 
     except Exception as e:
-        st.error(f"Erro: {repr(e)}")
+        st.error(f"Erro Crítico: {repr(e)}")
         st.text(traceback.format_exc())

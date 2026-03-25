@@ -3,7 +3,6 @@ import os
 import time
 import traceback
 from datetime import timedelta
-from dotenv import load_dotenv
 from google.oauth2 import service_account
 
 from src.service.sheets_service import SheetsService
@@ -11,18 +10,16 @@ from src.service.vtex_service import VtexService
 from src.processor.vtex_processor import VtexProcessor
 from src.service.drive_service import DriveService
 
-load_dotenv()
-
 st.set_page_config(page_title="VTEX Integration", layout="wide")
 
 google_credentials = service_account.Credentials.from_service_account_file(
-    os.getenv("GOOGLE_APPLICATION_CREDENTIALS"),
+    st.secrets["gcp_service_account"],
     scopes=["https://www.googleapis.com/auth/drive", "https://www.googleapis.com/auth/spreadsheets"]
 )
 
 with st.sidebar:
     st.header("Configurações do Processo")
-    folder_id = st.text_input("ID da Pasta (Drive)", value=os.getenv("DEFAULT_FOLDER_ID", ""))
+    folder_id = st.text_input("ID da Pasta (Drive)", value=st.secrets.get("DEFAULT_FOLDER_ID", ""))
     
     st.divider()
     st.subheader("Período de Busca")
